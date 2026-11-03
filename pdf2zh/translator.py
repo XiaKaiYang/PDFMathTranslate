@@ -1136,6 +1136,7 @@ class CodexTranslator(BaseTranslator):
         "CODEX_PROFILE": None,
         "CODEX_MODEL": "gpt-5.4-mini",
         "CODEX_TIMEOUT": "120",
+        "CODEX_REASONING_EFFORT": "none",
     }
     CustomPrompt = True
     REQUIRED_EXEC_FLAGS = {
@@ -1160,12 +1161,27 @@ class CodexTranslator(BaseTranslator):
         self, lang_in, lang_out, model, envs=None, prompt=None, ignore_cache=False
     ):
         self.set_envs(envs)
+        if "CODEX_REASONING_EFFORT" not in self.envs:
+            self.envs["CODEX_REASONING_EFFORT"] = os.environ.get(
+                "CODEX_REASONING_EFFORT", "none"
+            )
         if not model:
             model = self.envs["CODEX_MODEL"]
         super().__init__(lang_in, lang_out, model, ignore_cache)
         self.codex_bin = self.envs["CODEX_BIN"] or "codex"
         self.profile = self.envs["CODEX_PROFILE"]
         self.timeout = int(self.envs.get("CODEX_TIMEOUT") or "120")
+        self.reasoning_effort = self.envs.get("CODEX_REASONING_EFFORT") or "none"
+        if self.reasoning_effort not in {
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+        }:
+            raise ValueError("Invalid CODEX_REASONING_EFFORT")
         self.prompttext = prompt
         self.single_output_schema = {
             "type": "object",
@@ -1192,6 +1208,7 @@ class CodexTranslator(BaseTranslator):
         self.compat_command_available = False
         self.preferred_command_mode = "fast"
         self._probe_cli()
+        self.add_cache_impact_parameters("reasoning_effort", self.reasoning_effort)
         self.add_cache_impact_parameters("profile", self.profile)
         self.add_cache_impact_parameters("prompt", self.prompt("", self.prompttext))
         self.add_cache_impact_parameters("command_mode", self.preferred_command_mode)
@@ -1328,8 +1345,11 @@ class CodexTranslator(BaseTranslator):
         )
         if self.model and "--model" in self.supported_exec_flags:
             command.extend(["--model", self.model])
-        if mode == "fast" and "-c" in self.supported_exec_flags:
-            command.extend(["-c", 'model_reasoning_effort="none"'])
+        if "-c" not in self.supported_exec_flags:
+            raise RuntimeError(
+                "Codex CLI must support --config to select reasoning effort"
+            )
+        command.extend(["-c", f'model_reasoning_effort="{self.reasoning_effort}"'])
         command.extend(
             [
                 "--output-schema",

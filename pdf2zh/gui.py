@@ -225,6 +225,8 @@ def translate_file(
     file_input,
     link_input,
     service,
+    codex_model,
+    codex_effort,
     lang_from,
     lang_to,
     page_range,
@@ -312,8 +314,17 @@ def translate_file(
     lang_to = lang_map[lang_to]
 
     _envs = {}
-    for i, env in enumerate(translator.envs.items()):
+    env_items = list(translator.envs.items())
+    if translator is CodexTranslator:
+        env_items = [
+            (key, value)
+            for key, value in env_items
+            if key not in ("CODEX_MODEL", "CODEX_REASONING_EFFORT")
+        ]
+    for i, env in enumerate(env_items):
         _envs[env[0]] = envs[i]
+    if translator is CodexTranslator:
+        _envs.update(CODEX_MODEL=codex_model, CODEX_REASONING_EFFORT=codex_effort)
     for k, v in _envs.items():
         if str(k).upper().endswith("API_KEY") and str(v) == "***":
             # Load Real API_KEYs from local configure file
@@ -614,6 +625,19 @@ with gr.Blocks(
                 choices=enabled_services,
                 value=enabled_services[0],
             )
+            codex_model = gr.Dropdown(
+                label="Codex model",
+                choices=["gpt-5.4-mini"],
+                value="gpt-5.4-mini",
+                allow_custom_value=True,
+                visible=False,
+            )
+            codex_effort = gr.Dropdown(
+                label="Codex reasoning effort",
+                choices=["none", "minimal", "low", "medium", "high", "xhigh", "max"],
+                value="none",
+                visible=False,
+            )
             envs = []
             for i in range(3):
                 envs.append(
@@ -677,7 +701,14 @@ with gr.Blocks(
                 _envs = []
                 for i in range(4):
                     _envs.append(gr.update(visible=False, value=""))
-                for i, env in enumerate(translator.envs.items()):
+                env_items = list(translator.envs.items())
+                if translator is CodexTranslator:
+                    env_items = [
+                        (key, value)
+                        for key, value in env_items
+                        if key not in ("CODEX_MODEL", "CODEX_REASONING_EFFORT")
+                    ]
+                for i, env in enumerate(env_items):
                     label = env[0]
                     value = ConfigManager.get_env_by_translatername(
                         translator, env[0], env[1]
@@ -699,7 +730,14 @@ with gr.Blocks(
                         value=value,
                     )
                 _envs[-1] = gr.update(visible=translator.CustomPrompt)
-                return _envs
+                is_codex = translator is CodexTranslator
+                saved = ConfigManager.get_translator_by_name("codex") or {}
+                model = saved.get("CODEX_MODEL") or CodexTranslator.envs["CODEX_MODEL"]
+                effort = saved.get("CODEX_REASONING_EFFORT") or "none"
+                return _envs + [
+                    gr.update(visible=is_codex, value=model),
+                    gr.update(visible=is_codex, value=effort),
+                ]
 
             def on_select_filetype(file_type):
                 return (
@@ -738,7 +776,7 @@ with gr.Blocks(
             service.select(
                 on_select_service,
                 service,
-                envs,
+                envs + [codex_model, codex_effort],
             )
             vfont.change(on_vfont_change, inputs=vfont, outputs=None)
             file_type.select(
@@ -797,6 +835,8 @@ with gr.Blocks(
             file_input,
             link_input,
             service,
+            codex_model,
+            codex_effort,
             lang_from,
             lang_to,
             page_range,
