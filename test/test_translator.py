@@ -314,6 +314,55 @@ class TestCodexTranslator(unittest.TestCase):
         self.assertIn('model_reasoning_effort="none"', cmd)
         self.assertIn("gpt-5.4-mini", cmd)
 
+    def test_reasoning_effort_applies_in_both_command_modes_and_cache(self):
+        with mock.patch(
+            "pdf2zh.translator.subprocess.run", side_effect=self._probe_side_effect()
+        ):
+            translator = CodexTranslator(
+                "en", "zh", None, envs={"CODEX_REASONING_EFFORT": "high"}
+            )
+        for mode in ("fast", "compat"):
+            cmd = translator._build_command("text", "schema", "output", mode)
+            self.assertIn('model_reasoning_effort="high"', cmd)
+        self.assertEqual("high", translator.reasoning_effort)
+
+    def test_legacy_config_uses_environment_effort_and_separate_cache(self):
+        legacy = dict(CodexTranslator.envs)
+        legacy.pop("CODEX_REASONING_EFFORT")
+        ConfigManager.set_translator_by_name("codex", legacy)
+        with mock.patch.dict("os.environ", {"CODEX_REASONING_EFFORT": "high"}):
+            with mock.patch(
+                "pdf2zh.translator.subprocess.run",
+                side_effect=self._probe_side_effect(),
+            ):
+                first = CodexTranslator("en", "zh", None)
+        first.cache.set("source", "high result")
+        with mock.patch(
+            "pdf2zh.translator.subprocess.run", side_effect=self._probe_side_effect()
+        ):
+            second = CodexTranslator(
+                "en", "zh", None, envs={"CODEX_REASONING_EFFORT": "low"}
+            )
+        self.assertEqual("high", first.reasoning_effort)
+        self.assertIsNone(second.cache.get("source"))
+
+    def test_invalid_reasoning_effort_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "CODEX_REASONING_EFFORT"):
+            CodexTranslator(
+                "en", "zh", None, envs={"CODEX_REASONING_EFFORT": "invalid"}
+            )
+
+    def test_effort_requires_cli_config_flag(self):
+        with mock.patch(
+            "pdf2zh.translator.subprocess.run", side_effect=self._probe_side_effect()
+        ):
+            translator = CodexTranslator(
+                "en", "zh", None, envs={"CODEX_REASONING_EFFORT": "high"}
+            )
+        translator.supported_exec_flags.discard("-c")
+        with self.assertRaisesRegex(RuntimeError, "config"):
+            translator._build_command("text", "schema", "output", "compat")
+
     def test_do_translate_honors_profile_model_and_timeout(self):
         envs = {
             "CODEX_BIN": "/usr/local/bin/codex",
